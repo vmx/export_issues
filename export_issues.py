@@ -90,8 +90,8 @@ def download_embedded_images(json_data, folder):
     Downloads all of the images attached to issues for the repository.
     """
     json_str = json.dumps(json_data)
-    for path in re.findall(r'[\("]https:\/\/cloud.githubusercontent.com\/(.*?)[\)"]', json_str):
-        img_url = 'https://cloud.githubusercontent.com/'+path
+    for subdomain, path in re.findall(r'[\("]https:\/\/(cloud|user-images).githubusercontent.com\/(.*?)[\)"]', json_str):
+        img_url = f'https://{subdomain}.githubusercontent.com/{path}'
         response = requests.get(img_url, stream=True)
         if not response.ok:
             raise Exception('Got a bad response while download the embedded image from {}! {} {}'.format(img_url, response.status_code, response.reason))
