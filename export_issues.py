@@ -24,6 +24,7 @@ scripts.
 
 TOKEN = 'somegithubtoken'
 REPO = 'someusername/somerepo'  # username/repo
+ISSUE = None # Can be any issue number
 # The folder to download issue data to
 OUTPUT_FOLDER = '{}_issues'.format(REPO.replace('/', '_'))
 
@@ -61,14 +62,20 @@ def load_all_resource(url, token):
             data.extend(load_all_resource(pages['next'], token))
     return data
 
-def get_json(token, repo):
+def get_json(token, repo, issue = None):
     """
     Downloads all of the JSON for all of the issues in a repository. Also
     retrieves the comments and events for each issue, and saves those in the
     'comments' and 'events' attributes in the dictionary for each issue.
     """
-    data = load_all_resource(f'https://api.github.com/repos/{repo}/issues?state=all',
-                             token=token)
+    if issue is not None:
+        data = [
+            load_all_resource(
+                f'https://api.github.com/repos/{repo}/issues/{issue}',
+                token=token)]
+    else:
+        data = load_all_resource(f'https://api.github.com/repos/{repo}/issues?state=all',
+                                 token=token)
     # Load the comments and events on each issue
     for issue in data:
         print('#{}'.format(issue['number']))
@@ -166,7 +173,7 @@ if __name__ == '__main__':
     if not os.path.exists(OUTPUT_FOLDER):
         os.makedirs(OUTPUT_FOLDER)
     print('\033[32m' + 'Downloading issues...' + '\033[0m')
-    issues = get_json(TOKEN, REPO)
+    issues = get_json(TOKEN, REPO, ISSUE)
     print('\033[32m' + 'Downloading images attached to issues...' + '\033[0m')
     download_embedded_images(issues, OUTPUT_FOLDER)
     print('\033[32m' + 'Saving JSON...' + '\033[0m')
