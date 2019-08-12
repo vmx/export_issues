@@ -143,12 +143,16 @@ def build_markdown(repo, data):
     is a crude-but-functional mimicry of Github's issues.
     """
     lines = []
-    lines.append(mkdown_h('{} Issues'.format(repo), 1))
+    if ISSUE is None:
+        lines.append(mkdown_h('{} Issues'.format(repo), 1))
+        for issue in sorted(data, key=lambda x: x['number']):
+            lines.append('* [{1}: {0}](#{1})'.format(issue['title'], issue['number']))
+            lines.append('')
     for issue in sorted(data, key=lambda x: x['number']):
-        lines.append('* [{1}: {0}](#{1})'.format(issue['title'], issue['number']))
-    lines.append('')
-    for issue in sorted(data, key=lambda x: x['number']):
-        lines.append(mkdown_h('{}: {} ({})'.format(issue['number'], issue['title'], issue['state']), 2, link=issue['number']))
+        link = None
+        if ISSUE is None:
+            link = issue['number']
+        lines.append(mkdown_h('#{}: {} ({})'.format(issue['number'], issue['title'], issue['state']), 2, link=link))
         closed_string = ', closed {}'.format(issue['closed_at']) if issue['closed_at'] else ''
         lines.append(mkdown_p('Opened {} by {}'.format(issue['created_at'], issue['user']['login']) + closed_string))
         lines.append(mkdown_p(issue['body']))
