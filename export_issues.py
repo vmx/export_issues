@@ -48,7 +48,10 @@ def load_all_resource(url, token):
     all the pages and concatenate the results.
     """
     print(url)
-    headers = { 'Authorization': 'token ' + token }
+    headers = {
+        'Accept': 'application/vnd.github.squirrel-girl-preview+json',
+        'Authorization': 'token ' + token,
+    }
     r = requests.get(url, headers=headers)
     if not r.ok:
         raise Exception('Github returned status code {} ({}) when loading {}. Check that '
@@ -79,10 +82,17 @@ def get_json(token, repo, issue = None):
     # Load the comments and events on each issue
     for issue in data:
         print('#{}'.format(issue['number']))
+        issue['reactions'] = load_all_resource(
+            f'https://api.github.com/repos/{repo}/issues/{issue["number"]}/reactions',
+            token=token)
         issue['comments'] = load_all_resource(issue['comments_url'],
                                               token=token)
-        issue['events'] = load_all_resource(issue['events_url'],
-                                            token=token)
+        for comment in issue['comments']:
+            if comment['reactions']['total_count'] > 0:
+                comment['reactions_detailed'] = load_all_resource(
+                    comment['reactions']['url'],
+                    token=token)
+        issue['events'] = load_all_resource(issue['events_url'], token=token)
     return data
 
 def download_embedded_images(json_data, folder):
