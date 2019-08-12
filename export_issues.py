@@ -128,7 +128,7 @@ def mkdown_p(text):
     """
     Generates the markdown syntax for a paragraph.
     """
-    return text + '\n'
+    return '\n'.join([line.strip() for line in text.splitlines()]) + '\n'
 
 def mkdown_hr():
     """
