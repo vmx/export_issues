@@ -95,7 +95,8 @@ def download_embedded_images(json_data, folder):
         response = requests.get(img_url, stream=True)
         if not response.ok:
             raise Exception('Got a bad response while download the embedded image from {}! {} {}'.format(img_url, response.status_code, response.reason))
-        with open(os.path.join(folder, base64.b64encode(path)+'.'+path.rsplit('.',1)[-1]), 'wb') as f:
+        filename = base64.b64encode(path.encode('utf-8')).decode('ascii') + '.' + path.rsplit('.', 1)[-1]
+        with open(os.path.join(folder, filename), 'wb') as f:
             for block in response.iter_content(1024):
                 if not block:
                     break
