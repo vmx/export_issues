@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-This script uses Github's API V3 with Basic Authentication to export issues from
+This script uses Github's API V3 with a Token to export issues from
 a repository. The script saves a json file with all of the information from the
 API for issues, comments, and events (on the issues), downloads all of the
 images attached to issues, and generates a markdown file that can be rendered
@@ -13,7 +13,7 @@ a .md (markdown) file, and potentially a .html file that you can use to easily
 view the issues if the repository is deleted, in addition to any image files
 referenced in issues.
 
-To use the script, set the USERNAME, PASSWORD, and REPO variables below. You
+To use the script, set the TOKEN and REPO variables below. You
 will need the requests library, easily installed via pip or setuptools ("pip
 install requests" or "easy_install requests"). The gfm library is optional but
 recommended (also installable via pip).
@@ -22,8 +22,7 @@ The script is also somewhat modular, and functions can be imported by other
 scripts.
 """
 
-USERNAME = 'someusername'
-PASSWORD = 'notarealpassword'
+TOKEN = 'somegithubtoken'
 REPO = 'someusername/somerepo'  # username/repo
 # The folder to download issue data to
 OUTPUT_FOLDER = '{}_issues'.format(REPO.replace('/', '_'))
@@ -41,14 +40,15 @@ except ImportError:
     render_markdown = False
 
 
-def load_all_resource(url, auth):
+def load_all_resource(url, token):
     """
     Downloads JSON from an API URL. Github paginates when many items are
     present; if a requested URL has multiple pages, this function will request
     all the pages and concatenate the results.
     """
     print(url)
-    r = requests.get(url, auth=auth)
+    headers = { 'Authorization': 'token ' + token }
+    r = requests.get(url, headers=headers)
     if not r.ok:
         raise Exception('Github returned status code {} ({}) when loading {}. Check that '
                         'your username, password, and repo name are correct.'.format(r.status_code, r.reason, url))
@@ -58,24 +58,24 @@ def load_all_resource(url, auth):
         pages = {rel: url for url, rel in re.findall(r'<(.*?)>;\s+rel=\"(.*?)\"', r.headers['link'])}
         print(pages)
         if 'next' in pages:
-            data.extend(load_all_resource(pages['next'], auth))
+            data.extend(load_all_resource(pages['next'], token))
     return data
 
-def get_json(username, password, repo):
+def get_json(token, repo):
     """
     Downloads all of the JSON for all of the issues in a repository. Also
     retrieves the comments and events for each issue, and saves those in the
     'comments' and 'events' attributes in the dictionary for each issue.
     """
-    data = load_all_resource('https://api.github.com/repos/{}/issues?state=all'.format(repo),
-                       auth=(username, password))
+    data = load_all_resource(f'https://api.github.com/repos/{repo}/issues?state=all',
+                             token=token)
     # Load the comments and events on each issue
     for issue in data:
         print('#{}'.format(issue['number']))
         issue['comments'] = load_all_resource(issue['comments_url'],
-                                              auth=(username, password))
+                                              token=token)
         issue['events'] = load_all_resource(issue['events_url'],
-                                            auth=(username, password))
+                                            token=token)
     return data
 
 def download_embedded_images(json_data, folder):
@@ -166,7 +166,7 @@ if __name__ == '__main__':
     if not os.path.exists(OUTPUT_FOLDER):
         os.makedirs(OUTPUT_FOLDER)
     print('\033[32m' + 'Downloading issues...' + '\033[0m')
-    issues = get_json(USERNAME, PASSWORD, REPO)
+    issues = get_json(TOKEN, REPO)
     print('\033[32m' + 'Downloading images attached to issues...' + '\033[0m')
     download_embedded_images(issues, OUTPUT_FOLDER)
     print('\033[32m' + 'Saving JSON...' + '\033[0m')
