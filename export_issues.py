@@ -192,11 +192,14 @@ if __name__ == '__main__':
     print('\033[32m' + 'Downloading images attached to issues...' + '\033[0m')
     download_embedded_images(issues, OUTPUT_FOLDER)
     print('\033[32m' + 'Saving JSON...' + '\033[0m')
-    with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.json'), 'w', 'utf-8') as f:
+    filename = 'issues'
+    if ISSUE is not None:
+        filename = f'{ISSUE}'
+    with codecs.open(os.path.join(OUTPUT_FOLDER, f'{filename}.json'), 'w', 'utf-8') as f:
         json.dump(issues, f, indent=4)
     print('\033[32m' + 'Saving Markdown...' + '\033[0m')
     markdown = build_markdown(REPO, issues)
-    with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.md'), 'w', 'utf-8') as f:
+    with codecs.open(os.path.join(OUTPUT_FOLDER, f'{filename}.md'), 'w', 'utf-8') as f:
         f.write(markdown)
     if render_markdown:
         with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.html'), 'w', 'utf-8') as f:
