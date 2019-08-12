@@ -1,0 +1,279 @@
+"""
+This script uses Github's API V3 with Basic Authentication to export issues from
+a repository. The script saves a json file with all of the information from the
+API for issues, comments, and events (on the issues), downloads all of the
+images attached to issues, and generates a markdown file that can be rendered
+into a basic HTML page crudely mimicking Github's issue page. If the gfm module
+is available, the script will go ahead and render it itself.
+
+In the end, you'll be left with a folder containing a raw .json file (which you
+can use to extract information for your needs, or to import it somewhere else),
+a .md (markdown) file, and potentially a .html file that you can use to easily
+view the issues if the repository is deleted, in addition to any image files
+referenced in issues.
+
+To use the script, set the USERNAME, PASSWORD, and REPO variables below. You
+will need the requests library, easily installed via pip or setuptools ("pip
+install requests" or "easy_install requests"). The gfm library is optional but
+recommended (also installable via pip).
+
+The script is also somewhat modular, and functions can be imported by other
+scripts.
+"""
+
+USERNAME = 'someusername'
+PASSWORD = 'notarealpassword'
+REPO = 'someusername/somerepo'  # username/repo
+# The folder to download issue data to
+OUTPUT_FOLDER = '{}_issues'.format(REPO.replace('/', '_'))
+
+import os
+import re
+import requests
+import json
+import base64
+import codecs
+try:
+    import gfm
+    render_markdown = True
+except ImportError:
+    render_markdown = False
+
+
+def load_all_resource(url, auth):
+    """
+    Downloads JSON from an API URL. Github paginates when many items are
+    present; if a requested URL has multiple pages, this function will request
+    all the pages and concatenate the results.
+    """
+    print url
+    r = requests.get(url, auth=auth)
+    if not r.ok:
+        raise Exception('Github returned status code {} ({}) when loading {}. Check that '
+                        'your username, password, and repo name are correct.'.format(r.status_code, r.reason, url))
+    data = r.json()
+    # Load data from the next pages, if any
+    if 'link' in r.headers:
+        pages = {rel: url for url, rel in re.findall(r'<(.*?)>;\s+rel=\"(.*?)\"', r.headers['link'])}
+        print pages
+        if 'next' in pages:
+            data.extend(load_all_resource(pages['next'], auth))
+    return data
+
+def get_json(username, password, repo):
+    """
+    Downloads all of the JSON for all of the issues in a repository. Also
+    retrieves the comments and events for each issue, and saves those in the
+    'comments' and 'events' attributes in the dictionary for each issue.
+    """
+    data = load_all_resource('https://api.github.com/repos/{}/issues?state=all'.format(repo),
+                       auth=(username, password))
+    # Load the comments and events on each issue
+    for issue in data:
+        print '#{}'.format(issue['number'])
+        issue['comments'] = load_all_resource(issue['comments_url'],
+                                              auth=(username, password))
+        issue['events'] = load_all_resource(issue['events_url'],
+                                            auth=(username, password))
+    return data
+
+def download_embedded_images(json_data, folder):
+    """
+    Downloads all of the images attached to issues for the repository.
+    """
+    json_str = json.dumps(json_data)
+    for path in re.findall(r'[\("]https:\/\/cloud.githubusercontent.com\/(.*?)[\)"]', json_str):
+        img_url = 'https://cloud.githubusercontent.com/'+path
+        response = requests.get(img_url, stream=True)
+        if not response.ok:
+            raise Exception('Got a bad response while download the embedded image from {}! {} {}'.format(img_url, response.status_code, response.reason))
+        with open(os.path.join(folder, base64.b64encode(path)+'.'+path.rsplit('.',1)[-1]), 'wb') as f:
+            for block in response.iter_content(1024):
+                if not block:
+                    break
+                f.write(block)
+
+def mkdown_h(text, level, link=None):
+    """
+    Generates the markdown syntax for a header of a certain level.
+    """
+    if level is 1:
+        return ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
+                + '='*len(text)
+    elif level is 2:
+        return ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
+                + '-'*len(text)
+    else:
+        return '#'*level + ' ' + ('<a name="{}"></a>'.format(link) if link else '') + text
+
+def mkdown_p(text):
+    """
+    Generates the markdown syntax for a paragraph.
+    """
+    return text + '\n'
+
+def mkdown_hr():
+    """
+    Generates the markdown syntax for a horizontal rule.
+    """
+    return '---'
+
+def build_markdown(repo, data):
+    """
+    Generates the markdown for a repository's issue page. The resulting markdown
+    is a crude-but-functional mimicry of Github's issues.
+    """
+    lines = []
+    lines.append(mkdown_h('{} Issues'.format(repo), 1))
+    for issue in sorted(data, key=lambda x: x['number']):
+        lines.append('* [{1}: {0}](#{1})'.format(issue['title'], issue['number']))
+    lines.append('')
+    for issue in sorted(data, key=lambda x: x['number']):
+        lines.append(mkdown_h('{}: {} ({})'.format(issue['number'], issue['title'], issue['state']), 2, link=issue['number']))
+        closed_string = ', closed {}'.format(issue['closed_at']) if issue['closed_at'] else ''
+        lines.append(mkdown_p('Opened {} by {}'.format(issue['created_at'], issue['user']['login']) + closed_string))
+        lines.append(mkdown_p(issue['body']))
+        for item in sorted(issue['comments']+issue['events'], key=lambda x: x['created_at']):
+            if 'user' in item:
+                # It's a comment
+                lines.append(mkdown_hr())
+                lines.append(mkdown_h('({}) {}:'.format(item['created_at'], item['user']['login']), 4))
+                lines.append(mkdown_p(item['body']))
+            elif 'event' in item and item['event'] == 'labeled':
+                # It's a "labeled" event
+                lines.append(mkdown_hr())
+                lines.append(mkdown_h('({}) Labeled "{}"'.format(item['created_at'], item['label']['name']), 4))
+            elif 'event' in item and item['event'] == 'assigned':
+                # It's an "assigned" event
+                lines.append(mkdown_hr())
+                lines.append(mkdown_h('({}) Assigned to {}'.format(item['created_at'], item['assignee']['login']), 4))
+            elif 'event' in item and item['event'] == 'referenced':
+                # It's a "referenced" event
+                lines.append(mkdown_hr())
+                lines.append(mkdown_h('({}) Referenced by {} in commit {}'.format(item['created_at'], item['actor']['login'], item['commit_id']), 4))
+            elif 'event' in item and item['event'] == 'closed':
+                # It's a "closed" event
+                lines.append(mkdown_hr())
+                lines.append(mkdown_h('({}) Closed by {}'.format(item['created_at'], item['actor']['login']), 4))
+            elif 'event' in item and item['event'] == 'reopened':
+                # It's a "reopened" event
+                lines.append(mkdown_hr())
+                lines.append(mkdown_h('({}) Reopened by {}'.format(item['created_at'], item['actor']['login']), 4))
+    return '\n'.join(lines)
+
+if __name__ == '__main__':
+    if not os.path.exists(OUTPUT_FOLDER):
+        os.makedirs(OUTPUT_FOLDER)
+    print '\033[32m' + 'Downloading issues...' + '\033[0m'
+    issues = get_json(USERNAME, PASSWORD, REPO)
+    print '\033[32m' + 'Downloading images attached to issues...' + '\033[0m'
+    download_embedded_images(issues, OUTPUT_FOLDER)
+    print '\033[32m' + 'Saving JSON...' + '\033[0m'
+    with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.json'), 'w', 'utf-8') as f:
+        json.dump(issues, f, indent=4)
+    print '\033[32m' + 'Saving Markdown...' + '\033[0m'
+    markdown = build_markdown(REPO, issues)
+    with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.md'), 'w', 'utf-8') as f:
+        f.write(markdown)
+    if render_markdown:
+        with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.html'), 'w', 'utf-8') as f:
+            f.write('<html><head>'
+                    '<link href="markdown.css" rel="stylesheet" type="text/css" />'
+                    '</head><body><div class="markdown-body" style="max-width: 800px;margin: auto">')
+            f.write(gfm.markdown(markdown))
+            f.write('</div></body></html>')
+        with open(os.path.join(OUTPUT_FOLDER, 'markdown.css'), 'w') as f:
+            # Markdown CSS from https://github.com/sindresorhus/github-markdown-css
+            f.write(""".markdown-body hr:after,.markdown-body hr:before{display:table;content:""}
+                       .markdown-body ol,.markdown-body td,.markdown-body th,.markdown-body ul{padding:0}
+                       .font-face{font-family:octicons-anchor;src:url(data:font/woff;charset=utf-8;base64,d09GRgABAAAAAAYcAA0AAAAACjQAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAABGRlRNAAABMAAAABwAAAAca8vGTk9TLzIAAAFMAAAARAAAAFZG1VHVY21hcAAAAZAAAAA+AAABQgAP9AdjdnQgAAAB0AAAAAQAAAAEACICiGdhc3AAAAHUAAAACAAAAAj//wADZ2x5ZgAAAdwAAADRAAABEKyikaNoZWFkAAACsAAAAC0AAAA2AtXoA2hoZWEAAALgAAAAHAAAACQHngNFaG10eAAAAvwAAAAQAAAAEAwAACJsb2NhAAADDAAAAAoAAAAKALIAVG1heHAAAAMYAAAAHwAAACABEAB2bmFtZQAAAzgAAALBAAAFu3I9x/Nwb3N0AAAF/AAAAB0AAAAvaoFvbwAAAAEAAAAAzBdyYwAAAADP2IQvAAAAAM/bz7t4nGNgZGFgnMDAysDB1Ml0hoGBoR9CM75mMGLkYGBgYmBlZsAKAtJcUxgcPsR8iGF2+O/AEMPsznAYKMwIkgMA5REMOXicY2BgYGaAYBkGRgYQsAHyGMF8FgYFIM0ChED+h5j//yEk/3KoSgZGNgYYk4GRCUgwMaACRoZhDwCs7QgGAAAAIgKIAAAAAf//AAJ4nHWMMQrCQBBF/0zWrCCIKUQsTDCL2EXMohYGSSmorScInsRGL2DOYJe0Ntp7BK+gJ1BxF1stZvjz/v8DRghQzEc4kIgKwiAppcA9LtzKLSkdNhKFY3HF4lK69ExKslx7Xa+vPRVS43G98vG1DnkDMIBUgFN0MDXflU8tbaZOUkXUH0+U27RoRpOIyCKjbMCVejwypzJJG4jIwb43rfl6wbwanocrJm9XFYfskuVC5K/TPyczNU7b84CXcbxks1Un6H6tLH9vf2LRnn8Ax7A5WQAAAHicY2BkYGAA4teL1+yI57f5ysDNwgAC529f0kOmWRiYVgEpDgYmEA8AUzEKsQAAAHicY2BkYGB2+O/AEMPCAAJAkpEBFbAAADgKAe0EAAAiAAAAAAQAAAAEAAAAAAAAKgAqACoAiAAAeJxjYGRgYGBhsGFgYgABEMkFhAwM/xn0QAIAD6YBhwB4nI1Ty07cMBS9QwKlQapQW3VXySvEqDCZGbGaHULiIQ1FKgjWMxknMfLEke2A+IJu+wntrt/QbVf9gG75jK577Lg8K1qQPCfnnnt8fX1NRC/pmjrk/zprC+8D7tBy9DHgBXoWfQ44Av8t4Bj4Z8CLtBL9CniJluPXASf0Lm4CXqFX8Q84dOLnMB17N4c7tBo1AS/Qi+hTwBH4rwHHwN8DXqQ30XXAS7QaLwSc0Gn8NuAVWou/gFmnjLrEaEh9GmDdDGgL3B4JsrRPDU2hTOiMSuJUIdKQQayiAth69r6akSSFqIJuA19TrzCIaY8sIoxyrNIrL//pw7A2iMygkX5vDj+G+kuoLdX4GlGK/8Lnlz6/h9MpmoO9rafrz7ILXEHHaAx95s9lsI7AHNMBWEZHULnfAXwG9/ZqdzLI08iuwRloXE8kfhXYAvE23+23DU3t626rbs8/8adv+9DWknsHp3E17oCf+Z48rvEQNZ78paYM38qfk3v/u3l3u3GXN2Dmvmvpf1Srwk3pB/VSsp512bA/GG5i2WJ7wu430yQ5K3nFGiOqgtmSB5pJVSizwaacmUZzZhXLlZTq8qGGFY2YcSkqbth6aW1tRmlaCFs2016m5qn36SbJrqosG4uMV4aP2PHBmB3tjtmgN2izkGQyLWprekbIntJFing32a5rKWCN/SdSoga45EJykyQ7asZvHQ8PTm6cslIpwyeyjbVltNikc2HTR7YKh9LBl9DADC0U/jLcBZDKrMhUBfQBvXRzLtFtjU9eNHKin0x5InTqb8lNpfKv1s1xHzTXRqgKzek/mb7nB8RZTCDhGEX3kK/8Q75AmUM/eLkfA+0Hi908Kx4eNsMgudg5GLdRD7a84npi+YxNr5i5KIbW5izXas7cHXIMAau1OueZhfj+cOcP3P8MNIWLyYOBuxL6DRylJ4cAAAB4nGNgYoAALjDJyIAOWMCiTIxMLDmZedkABtIBygAAAA==) format('woff')}
+                       .markdown-body{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;text-size-adjust:100%;color:#333;overflow:hidden;font-family:"Helvetica Neue",Helvetica,"Segoe UI",Arial,freesans,sans-serif;font-size:16px;line-height:1.6;word-wrap:break-word}
+                       .markdown-body strong{font-weight:700}
+                       .markdown-body h1{margin:.67em 0}
+                       .markdown-body img{border:0}
+                       .markdown-body hr{box-sizing:content-box}
+                       .markdown-body *,.markdown-body img{box-sizing:border-box}
+                       .markdown-body input{color:inherit;margin:0;line-height:normal;font:13px/1.4 Helvetica,arial,nimbussansl,liberationsans,freesans,clean,sans-serif,"Segoe UI Emoji","Segoe UI Symbol"}
+                       .markdown-body html input[disabled]{cursor:default}
+                       .markdown-body input[type=checkbox]{box-sizing:border-box;padding:0}
+                       .markdown-body a{background-color:transparent;color:#4078c0;text-decoration:none}
+                       .markdown-body a:active,.markdown-body a:hover{outline:0;text-decoration:underline}
+                       .markdown-body hr:after{clear:both}
+                       .markdown-body blockquote{margin:0}
+                       .markdown-body h1,.markdown-body h2{padding-bottom:.3em;border-bottom:1px solid #eee}
+                       .markdown-body ol ol,.markdown-body ul ol{list-style-type:lower-roman}
+                       .markdown-body ol ol ol,.markdown-body ol ul ol,.markdown-body ul ol ol,.markdown-body ul ul ol{list-style-type:lower-alpha}
+                       .markdown-body dd{margin-left:0}
+                       .markdown-body code{font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace}
+                       .markdown-body pre{font:12px Consolas,"Liberation Mono",Menlo,Courier,monospace;word-wrap:normal}
+                       .markdown-body .octicon{font:normal normal normal 16px/1 octicons-anchor;display:inline-block;text-decoration:none;text-rendering:auto;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}
+                       .markdown-body .octicon-link:before{content:'\f05c'}
+                       .markdown-body>:first-child{margin-top:0!important}
+                       .markdown-body>:last-child{margin-bottom:0!important}
+                       .markdown-body a:not([href]){color:inherit;text-decoration:none}
+                       .markdown-body .anchor{position:absolute;top:0;left:0;display:block;padding-right:6px;padding-left:30px;margin-left:-30px}
+                       .markdown-body .anchor:focus{outline:0}
+                       .markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4,.markdown-body h5,.markdown-body h6{position:relative;margin-top:1em;margin-bottom:16px;font-weight:700;line-height:1.4}
+                       .markdown-body h1 .octicon-link,.markdown-body h2 .octicon-link,.markdown-body h3 .octicon-link,.markdown-body h4 .octicon-link,.markdown-body h5 .octicon-link,.markdown-body h6 .octicon-link{display:none;color:#000;vertical-align:middle}
+                       .markdown-body h1:hover .anchor,.markdown-body h2:hover .anchor,.markdown-body h3:hover .anchor,.markdown-body h4:hover .anchor,.markdown-body h5:hover .anchor,.markdown-body h6:hover .anchor{padding-left:8px;margin-left:-30px;text-decoration:none}
+                       .markdown-body h1:hover .anchor .octicon-link,.markdown-body h2:hover .anchor .octicon-link,.markdown-body h3:hover .anchor .octicon-link,.markdown-body h4:hover .anchor .octicon-link,.markdown-body h5:hover .anchor .octicon-link,.markdown-body h6:hover .anchor .octicon-link{display:inline-block}
+                       .markdown-body h1{font-size:2.25em;line-height:1.2}
+                       .markdown-body h1 .anchor{line-height:1}
+                       .markdown-body h2{font-size:1.75em;line-height:1.225}
+                       .markdown-body h2 .anchor{line-height:1}
+                       .markdown-body h3{font-size:1.5em;line-height:1.43}
+                       .markdown-body h3 .anchor,.markdown-body h4 .anchor{line-height:1.2}
+                       .markdown-body h4{font-size:1.25em}
+                       .markdown-body h5 .anchor,.markdown-body h6 .anchor{line-height:1.1}
+                       .markdown-body h5{font-size:1em}
+                       .markdown-body h6{font-size:1em;color:#777}
+                       .markdown-body blockquote,.markdown-body dl,.markdown-body ol,.markdown-body p,.markdown-body pre,.markdown-body table,.markdown-body ul{margin-top:0;margin-bottom:16px}
+                       .markdown-body hr{overflow:hidden;background:#e7e7e7;height:4px;padding:0;margin:16px 0;border:0}
+                       .markdown-body ol,.markdown-body ul{padding-left:2em}
+                       .markdown-body ol ol,.markdown-body ol ul,.markdown-body ul ol,.markdown-body ul ul{margin-top:0;margin-bottom:0}
+                       .markdown-body li>p{margin-top:16px}
+                       .markdown-body dl{padding:0}
+                       .markdown-body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}
+                       .markdown-body dl dd{padding:0 16px;margin-bottom:16px}
+                       .markdown-body blockquote{padding:0 15px;color:#777;border-left:4px solid #ddd}
+                       .markdown-body blockquote>:first-child{margin-top:0}
+                       .markdown-body blockquote>:last-child{margin-bottom:0}
+                       .markdown-body table{border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}
+                       .markdown-body table th{font-weight:700}
+                       .markdown-body table td,.markdown-body table th{padding:6px 13px;border:1px solid #ddd}
+                       .markdown-body table tr{background-color:#fff;border-top:1px solid #ccc}
+                       .markdown-body table tr:nth-child(2n){background-color:#f8f8f8}
+                       .markdown-body img{max-width:100%}
+                       .markdown-body code{padding:.2em 0;margin:0;font-size:85%;background-color:rgba(0,0,0,.04);border-radius:3px}
+                       .markdown-body code:after,.markdown-body code:before{letter-spacing:-.2em;content:"\00a0"}
+                       .markdown-body pre>code{padding:0;margin:0;font-size:100%;word-break:normal;white-space:pre;background:0 0;border:0}
+                       .markdown-body .highlight{margin-bottom:16px}
+                       .markdown-body .highlight pre,.markdown-body pre{padding:16px;overflow:auto;font-size:85%;line-height:1.45;background-color:#f7f7f7;border-radius:3px}
+                       .markdown-body .highlight pre{margin-bottom:0;word-break:normal}
+                       .markdown-body pre code{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}
+                       .markdown-body pre code:after,.markdown-body pre code:before{content:normal}
+                       .markdown-body .pl-c{color:#969896}
+                       .markdown-body .pl-c1,.markdown-body .pl-s .pl-v{color:#0086b3}
+                       .markdown-body .pl-e,.markdown-body .pl-en{color:#795da3}
+                       .markdown-body .pl-s .pl-s1,.markdown-body .pl-smi{color:#333}
+                       .markdown-body .pl-ent{color:#63a35c}
+                       .markdown-body .pl-k{color:#a71d5d}
+                       .markdown-body .pl-pds,.markdown-body .pl-s,.markdown-body .pl-s .pl-pse .pl-s1,.markdown-body .pl-sr,.markdown-body .pl-sr .pl-cce,.markdown-body .pl-sr .pl-sra,.markdown-body .pl-sr .pl-sre{color:#183691}
+                       .markdown-body .pl-v{color:#ed6a43}
+                       .markdown-body .pl-id{color:#b52a1d}
+                       .markdown-body .pl-ii{background-color:#b52a1d;color:#f8f8f8}
+                       .markdown-body .pl-sr .pl-cce{color:#63a35c;font-weight:700}
+                       .markdown-body .pl-ml{color:#693a17}
+                       .markdown-body .pl-mh,.markdown-body .pl-mh .pl-en,.markdown-body .pl-ms{color:#1d3e81;font-weight:700}
+                       .markdown-body .pl-mq{color:teal}
+                       .markdown-body .pl-mi{color:#333;font-style:italic}
+                       .markdown-body .pl-mb{color:#333;font-weight:700}
+                       .markdown-body .pl-md{background-color:#ffecec;color:#bd2c00}
+                       .markdown-body .pl-mi1{background-color:#eaffea;color:#55a532}
+                       .markdown-body .pl-mdr{color:#795da3;font-weight:700}
+                       .markdown-body .pl-mo{color:#1d3e81}
+                       .markdown-body kbd{display:inline-block;padding:3px 5px;font:11px Consolas,"Liberation Mono",Menlo,Courier,monospace;line-height:10px;color:#555;vertical-align:middle;background-color:#fcfcfc;border:1px solid #ccc;border-bottom-color:#bbb;border-radius:3px;box-shadow:inset 0 -1px 0 #bbb}
+                       .markdown-body .task-list-item{list-style-type:none}
+                       .markdown-body .task-list-item+.task-list-item{margin-top:3px}
+                       .markdown-body .task-list-item input{margin:0 .35em .25em -1.6em;vertical-align:middle}
+                       .markdown-body :checked+.radio-label{z-index:1;position:relative;border-color:#4078c0}""")
