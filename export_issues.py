@@ -33,7 +33,6 @@ import re
 import requests
 import json
 import base64
-import codecs
 try:
     import gfm
     render_markdown = True
@@ -195,14 +194,14 @@ if __name__ == '__main__':
     filename = 'issues'
     if ISSUE is not None:
         filename = f'{ISSUE}'
-    with codecs.open(os.path.join(OUTPUT_FOLDER, f'{filename}.json'), 'w', 'utf-8') as f:
+    with open(os.path.join(OUTPUT_FOLDER, f'{filename}.json'), 'w', encoding='utf-8') as f:
         json.dump(issues, f, indent=4)
     print('\033[32m' + 'Saving Markdown...' + '\033[0m')
     markdown = build_markdown(REPO, issues)
-    with codecs.open(os.path.join(OUTPUT_FOLDER, f'{filename}.md'), 'w', 'utf-8') as f:
+    with open(os.path.join(OUTPUT_FOLDER, f'{filename}.md'), 'w', encoding='utf-8') as f:
         f.write(markdown)
     if render_markdown:
-        with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.html'), 'w', 'utf-8') as f:
+        with open(os.path.join(OUTPUT_FOLDER, 'issues.html'), 'w', encoding='utf-8') as f:
             f.write('<html><head>'
                     '<link href="markdown.css" rel="stylesheet" type="text/css" />'
                     '</head><body><div class="markdown-body" style="max-width: 800px;margin: auto">')
