@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 This script uses Github's API V3 with Basic Authentication to export issues from
 a repository. The script saves a json file with all of the information from the
@@ -46,7 +47,7 @@ def load_all_resource(url, auth):
     present; if a requested URL has multiple pages, this function will request
     all the pages and concatenate the results.
     """
-    print url
+    print(url)
     r = requests.get(url, auth=auth)
     if not r.ok:
         raise Exception('Github returned status code {} ({}) when loading {}. Check that '
@@ -55,7 +56,7 @@ def load_all_resource(url, auth):
     # Load data from the next pages, if any
     if 'link' in r.headers:
         pages = {rel: url for url, rel in re.findall(r'<(.*?)>;\s+rel=\"(.*?)\"', r.headers['link'])}
-        print pages
+        print(pages)
         if 'next' in pages:
             data.extend(load_all_resource(pages['next'], auth))
     return data
@@ -70,7 +71,7 @@ def get_json(username, password, repo):
                        auth=(username, password))
     # Load the comments and events on each issue
     for issue in data:
-        print '#{}'.format(issue['number'])
+        print('#{}'.format(issue['number']))
         issue['comments'] = load_all_resource(issue['comments_url'],
                                               auth=(username, password))
         issue['events'] = load_all_resource(issue['events_url'],
@@ -164,14 +165,14 @@ def build_markdown(repo, data):
 if __name__ == '__main__':
     if not os.path.exists(OUTPUT_FOLDER):
         os.makedirs(OUTPUT_FOLDER)
-    print '\033[32m' + 'Downloading issues...' + '\033[0m'
+    print('\033[32m' + 'Downloading issues...' + '\033[0m')
     issues = get_json(USERNAME, PASSWORD, REPO)
-    print '\033[32m' + 'Downloading images attached to issues...' + '\033[0m'
+    print('\033[32m' + 'Downloading images attached to issues...' + '\033[0m')
     download_embedded_images(issues, OUTPUT_FOLDER)
-    print '\033[32m' + 'Saving JSON...' + '\033[0m'
+    print('\033[32m' + 'Saving JSON...' + '\033[0m')
     with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.json'), 'w', 'utf-8') as f:
         json.dump(issues, f, indent=4)
-    print '\033[32m' + 'Saving Markdown...' + '\033[0m'
+    print('\033[32m' + 'Saving Markdown...' + '\033[0m')
     markdown = build_markdown(REPO, issues)
     with codecs.open(os.path.join(OUTPUT_FOLDER, 'issues.md'), 'w', 'utf-8') as f:
         f.write(markdown)
