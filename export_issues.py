@@ -82,6 +82,22 @@ def get_json(token, repo, issue = None):
                     comment['reactions']['url'],
                     token=token)
         issue['events'] = load_all_resource(issue['events_url'], token=token)
+        # If it is a pull request, also extract the source files and review
+        # comments
+        if 'pull_request' in issue:
+            issue['reviews'] = load_all_resource(
+                f'https://api.github.com/repos/{repo}/pulls/{issue["number"]}/reviews',
+                token=token)
+            issue['review_comments'] = load_all_resource(
+                f'https://api.github.com/repos/{repo}/pulls/{issue["number"]}/comments',
+                token=token)
+            issue['files'] = load_all_resource(
+                f'https://api.github.com/repos/{repo}/pulls/{issue["number"]}/files',
+                token=token)
+            for file_ in issue['files']:
+                file_['contents']= load_all_resource(
+                    file_['contents_url'],
+                    token=token)
     return data
 
 def download_embedded_images(json_data, folder):
