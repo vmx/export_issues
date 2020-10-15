@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 """
+SPDX-License-Identifier: MIT
+
+This script is based on Ryan Eberhardt work:
+https://gist.github.com/reberhardt7/bf197865297a95b5ac3d
+
+I modified it to fit my needs and released it unter the MIT License (with
+permission).
+
 This script uses Github's API V3 with a Token to export issues from
 a repository. The script saves a json file with all of the information from the
 API for issues, comments, and events (on the issues), downloads all of the
