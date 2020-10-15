@@ -115,10 +115,10 @@ def mkdown_h(text, level, link=None):
     """
     Generates the markdown syntax for a header of a certain level.
     """
-    if level is 1:
+    if level == 1:
         return ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
                 + '='*len(text)
-    elif level is 2:
+    elif level == 2:
         return ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
                 + '-'*len(text)
     else:
