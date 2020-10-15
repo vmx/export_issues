@@ -29,6 +29,7 @@ import re
 import requests
 import json
 import base64
+from collections import defaultdict
 
 def load_all_resource(url, token):
     """
@@ -88,6 +89,10 @@ def get_json(token, repo, issue = None):
             issue['reviews'] = load_all_resource(
                 f'https://api.github.com/repos/{repo}/pulls/{issue["number"]}/reviews',
                 token=token)
+            # Review comments don't have a `created_at` value. Copy the
+            # `submitted_at` value, so that further processing is more uniform
+            for review in issue['reviews']:
+                review['created_at'] = review['submitted_at']
             issue['review_comments'] = load_all_resource(
                 f'https://api.github.com/repos/{repo}/pulls/{issue["number"]}/comments',
                 token=token)
@@ -122,13 +127,13 @@ def mkdown_h(text, level, link=None):
     Generates the markdown syntax for a header of a certain level.
     """
     if level == 1:
-        return ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
+        return '\n' + ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
                 + '='*len(text)
     elif level == 2:
-        return ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
+        return '\n' + ('<a name="{}"></a>'.format(link) if link else '') + text + '\n' \
                 + '-'*len(text)
     else:
-        return '#'*level + ' ' + ('<a name="{}"></a>'.format(link) if link else '') + text
+        return '\n' + '#'*level + ' ' + ('<a name="{}"></a>'.format(link) if link else '') + text
 
 def mkdown_p(text):
     """
@@ -140,7 +145,13 @@ def mkdown_hr():
     """
     Generates the markdown syntax for a horizontal rule.
     """
-    return '---'
+    return '\n---'
+
+def mkdown_blockquote(text):
+    """
+    Generates the markdown syntax for a blockquote.
+    """
+    return '\n'.join([f'> {line.strip()}' for line in text.splitlines()])
 
 def build_markdown(repo, data):
     """
@@ -161,10 +172,55 @@ def build_markdown(repo, data):
         closed_string = ', closed {}'.format(issue['closed_at']) if issue['closed_at'] else ''
         lines.append(mkdown_p('Opened {} by {}'.format(issue['created_at'], issue['user']['login']) + closed_string))
         lines.append(mkdown_p(issue['body']))
-        for item in sorted(issue['comments']+issue['events'], key=lambda x: x['created_at']):
+
+        # If it is a Pull Request, then ouput all markdown files with review
+        # comments
+        if 'pull_request' in issue:
+            lines.append(mkdown_h('Files', 2))
+            for file_ in issue['files']:
+                if file_['contents']['name'].endswith('.md'):
+                    lines.append(mkdown_p(f"`{file_['contents']['path']}`"))
+                    contents = base64.b64decode(
+                        file_['contents']['content']
+                    ).decode('utf-8')
+
+                    # A dict where the key is the line and the value is a list
+                    # of comments sorted chronologically starting with the
+                    # oldest
+                    comments = defaultdict(list)
+                    for comment in issue['review_comments']:
+                        # Only look into comments of the current file
+                        if comment['path'] != file_['contents']['path']:
+                            continue
+
+                        if comment['line'] is not None:
+                            comments[comment['line']].append(comment)
+
+                    for number, line in enumerate(contents.splitlines(), 1):
+                        lines.append(line)
+                        if number in comments:
+                            for comment in comments[number]:
+                                lines.append(mkdown_blockquote(mkdown_hr()))
+                                lines.append(mkdown_blockquote(
+                                    mkdown_h(
+                                        '({}) {}:'.format(
+                                            comment['created_at'],
+                                            comment['user']['login']),
+                                        4)))
+                                lines.append(mkdown_blockquote(
+                                    comment['body']))
+                    lines.append(mkdown_hr())
+
+        lines.append(mkdown_h('Comments', 2))
+
+        for num, item in enumerate(sorted(issue['comments']+issue['events']+issue['reviews'], key=lambda x: x['created_at'])):
+            if 'body' in item and item['body'] == '':
+                continue
+
             if 'user' in item:
                 # It's a comment
-                lines.append(mkdown_hr())
+                if num:
+                    lines.append(mkdown_hr())
                 lines.append(mkdown_h('({}) {}:'.format(item['created_at'], item['user']['login']), 4))
                 lines.append(mkdown_p(item['body']))
             elif 'event' in item and item['event'] == 'labeled':
