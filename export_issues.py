@@ -204,9 +204,21 @@ def build_markdown(repo, data):
                         if comment['line'] is not None:
                             comments[comment['line']].append(comment)
 
+                    # Contains the current code block opening line in case
+                    # there was one
+                    codeblock = None
                     for number, line in enumerate(contents.splitlines(), 1):
+                        if line.startswith('```'):
+                            if codeblock is None:
+                                codeblock = line
+                            else:
+                                codeblock = None
                         lines.append(line)
                         if number in comments:
+                            # Close current code block in order to output
+                            # correctly formatted comments
+                            if codeblock is not None:
+                                lines.append('```')
                             for comment in comments[number]:
                                 lines.append(mkdown_blockquote(mkdown_hr()))
                                 lines.append(mkdown_blockquote(
@@ -217,6 +229,9 @@ def build_markdown(repo, data):
                                         4)))
                                 lines.append(mkdown_blockquote(
                                     comment['body']))
+                            # Open the code block again
+                            if codeblock is not None:
+                                lines.append(codeblock)
                     lines.append(mkdown_hr())
 
         lines.append(mkdown_h('Comments', 2))
