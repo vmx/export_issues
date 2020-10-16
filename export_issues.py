@@ -236,36 +236,41 @@ def build_markdown(repo, data):
 
         lines.append(mkdown_h('Comments', 2))
 
-        for num, item in enumerate(sorted(issue['comments']+issue['events']+issue['reviews'], key=lambda x: x['created_at'])):
+        is_first_item = True
+        for item in sorted(issue['comments']+issue['events']+issue['reviews'], key=lambda x: x['created_at']):
             if 'body' in item and item['body'] == '':
                 continue
 
+            items = []
             if 'user' in item:
                 # It's a comment
-                if num:
-                    lines.append(mkdown_hr())
-                lines.append(mkdown_h('({}) {}:'.format(item['created_at'], item['user']['login']), 4))
-                lines.append(mkdown_p(item['body']))
+                items.append(mkdown_h('({}) {}:'.format(item['created_at'], item['user']['login']), 4))
+                items.append(mkdown_p(item['body']))
             elif 'event' in item and item['event'] == 'labeled':
                 # It's a "labeled" event
-                lines.append(mkdown_hr())
-                lines.append(mkdown_h('({}) Labeled "{}"'.format(item['created_at'], item['label']['name']), 4))
+                items.append(mkdown_h('({}) Labeled "{}"'.format(item['created_at'], item['label']['name']), 4))
             elif 'event' in item and item['event'] == 'assigned':
                 # It's an "assigned" event
-                lines.append(mkdown_hr())
-                lines.append(mkdown_h('({}) Assigned to {}'.format(item['created_at'], item['assignee']['login']), 4))
+                items.append(mkdown_h('({}) Assigned to {}'.format(item['created_at'], item['assignee']['login']), 4))
             elif 'event' in item and item['event'] == 'referenced':
                 # It's a "referenced" event
-                lines.append(mkdown_hr())
-                lines.append(mkdown_h('({}) Referenced by {} in commit {}'.format(item['created_at'], item['actor']['login'], item['commit_id']), 4))
+                items.append(mkdown_h('({}) Referenced by {} in commit {}'.format(item['created_at'], item['actor']['login'], item['commit_id']), 4))
             elif 'event' in item and item['event'] == 'closed':
                 # It's a "closed" event
-                lines.append(mkdown_hr())
-                lines.append(mkdown_h('({}) Closed by {}'.format(item['created_at'], item['actor']['login']), 4))
+                items.append(mkdown_h('({}) Closed by {}'.format(item['created_at'], item['actor']['login']), 4))
             elif 'event' in item and item['event'] == 'reopened':
                 # It's a "reopened" event
-                lines.append(mkdown_hr())
-                lines.append(mkdown_h('({}) Reopened by {}'.format(item['created_at'], item['actor']['login']), 4))
+                items.append(mkdown_h('({}) Reopened by {}'.format(item['created_at'], item['actor']['login']), 4))
+
+            # Don't put a horizontal rule before the first item
+            if items:
+                if is_first_item:
+                    is_first_item = False
+                else:
+                    lines.append(mkdown_hr())
+
+            lines.extend(items)
+
     return '\n'.join(lines)
 
 if __name__ == '__main__':
